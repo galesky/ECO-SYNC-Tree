@@ -48,7 +48,7 @@ public class SimpleFullMembership extends GenericProtocol {
         this.rnd = new Random();
 
         //Get some configurations from the Properties object
-        this.subsetSize = Integer.parseInt(props.getProperty("sample_size", "6"));
+        this.subsetSize = Integer.parseInt(props.getProperty("sample_size", "40"));
         this.sampleTime = Integer.parseInt(props.getProperty("sample_time", "2000")); //2 seconds
 
         String cMetricsInterval = props.getProperty("channel_metrics_interval", "10000"); //10 seconds
@@ -136,7 +136,7 @@ public class SimpleFullMembership extends GenericProtocol {
     /*--------------------------------- Timers ---------------------------------------- */
     private void uponSampleTimer(SampleTimer timer, long timerId) {
         //When the SampleTimer is triggered, get a random peer in the membership and send a sample
-        logger.info("Sample Time: membership{}", membership);
+        logger.info("Sample Time: membership{} for subset size {}", membership, subsetSize);
         if (membership.size() > 0) {
             Host target = getRandom(membership);
             Set<Host> subset = getRandomSubsetExcluding(membership, subsetSize, target);

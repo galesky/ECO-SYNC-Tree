@@ -106,7 +106,7 @@ public class VCube extends CommunicationCostCalculator {
 
     @Override
     public void init(Properties props) {
-        setupTimer(new SetupOverlayTimer(), (long) Math.ceil(createTime * TO_MILLIS * 0.7                                         ));
+        setupTimer(new SetupOverlayTimer(), (long) Math.ceil(createTime * TO_MILLIS * 0.7));
         setupMyTopics();
     }
 
@@ -159,19 +159,19 @@ public class VCube extends CommunicationCostCalculator {
         logger.info("Propagating my {} to {}", mid, neighborSet);
         // at this point we will likely decide to which topic to send the message to given a hot-topic distribution.
         TopicGossipMessage msg = new TopicGossipMessage(mid, myself, seqNumber, content, request.getTopic(), oldCausalBarrierList);
-        logger.info("BROADCAST_REQUEST {} with barrier {}", mid, oldCausalBarrierList);
+        logger.debug("BROADCAST_REQUEST {} with barrier {}", mid, oldCausalBarrierList);
         uponReceiveGossipMsg(msg, myself, getProtoId(), -1);
     }
 
     private void uponReceiveGossipMsg(TopicGossipMessage msg, Host from, short sourceProto, int channelId) {
         UUID mid = msg.getMid();
         int topic = msg.getTopic();
-        logger.info("Received {} from {}. Topic is {}", msg, from, topic);
+        logger.debug("Received {} from {}. Topic is {}", msg, from, topic);
         if (receivedMsgIds.add(mid)) {
             logger.info("Total unique PUB messages so far {}", receivedMsgIds.size());
             handleTopicGossipMessage(msg, from);
         } else {
-            logger.info("DUPLICATE from {}", from);
+            logger.info("DUPLICATE GOSSIP from {}", from);
             // track stats here
         }
     }
@@ -179,7 +179,7 @@ public class VCube extends CommunicationCostCalculator {
     private void handleTopicGossipMessage(TopicGossipMessage msg, Host from) {
         int t = msg.getTopic();
 
-        logger.info("PRE-RECEIVED TopicGossip {}", msg);
+        logger.debug("PRE-RECEIVED TopicGossip {}", msg);
 
         if (! this.receptions.containsKey(t)) {
             this.receptions.put(t, new ArrayList<>());
@@ -192,7 +192,7 @@ public class VCube extends CommunicationCostCalculator {
         this.receptions.get(t).add(msg);
 
         UUID mid = msg.getMid();
-        logger.info("RECEIVED TopicGossip {}", msg);
+        logger.info("RECEIVED {}", msg.getMid());
         // Forward first
         // the transmission process is async, use a copy
         TopicGossipMessage payload = TopicGossipMessage.from(msg);
@@ -209,13 +209,13 @@ public class VCube extends CommunicationCostCalculator {
         int cluster = myself.equals(from) ? getDimension() : (cluster(myId, idFromHostAddress(from)) - 1);
         List<Integer> neighbors = hypercubeNeighborhood(myId, cluster, msg.getTopic());
 
-        logger.info("Determined HypercubeNeighbors {} for cluster {}", neighbors, cluster);
+        logger.debug("Determined HypercubeNeighbors {} for cluster {}", neighbors, cluster);
         neighbors.forEach(hostId -> {
             Host host = hostByNodeId.get(hostId);
-            logger.info("Select host {} with id {}", host, hostId);
+            logger.debug("Select host {} with id {}", host, hostId);
 
             if (!host.equals(from)) {
-                logger.info("SENT {} to {}", msg, host);
+                logger.info("SENT {} to {}", msg.getMid(), host);
                 sendMessage(msg, host);
                 // this.stats.incrementSentFlood();
             }
@@ -223,8 +223,21 @@ public class VCube extends CommunicationCostCalculator {
     }
 
     private void onMessageFailed(ProtoMessage protoMessage, Host host, short destProto, Throwable reason, int channel) {
-        logger.warn("Message failed to " + host + ", " + protoMessage + ": " + reason.getMessage());
+        logger.warn("Message failed to " + host + ", " + protoMessage + ": " + reason.getMessage() + reason);
+
+        // It has been observed that an out connection may fail without notifying the channel (FLP ?)
+        // the failure can only be observed when a message fails to be delivered.
+        // In this case we attempt to re-establish the connection and retry  the messages
+        if (Objects.equals(reason.getMessage(), "No outgoing connection")) {
+            logger.info("Retrying to open connection " + host + ", " + protoMessage + ": " + reason.getMessage() + reason);
+            openConnection(host);
+            // is this awaitable ?
+            logger.info("Retrying sending message " + host + ", " + protoMessage + ": " + reason.getMessage() + reason);
+            sendMessage(protoMessage, host);
+        }
     }
+
+
 
     // --------- SUB/UNS message handling ------
     private void uponSetupOverlayTimer(SetupOverlayTimer timer, long timerId) {
@@ -276,10 +289,10 @@ public class VCube extends CommunicationCostCalculator {
     private void forwardTopicSubMessage(TopicSubMessage msg, Host from) {
         // dryrun hypercube
         List<Integer> hypercubeNeighborhood = hypercubeNeighborhood(myId, getDimension(), null);
-        logger.info("Determined hypercubeNeighbors {}", hypercubeNeighborhood);
+        logger.debug("Determined hypercubeNeighbors {}", hypercubeNeighborhood);
         neighborSet.forEach(host -> {
             if (!host.equals(from)) {
-                logger.info("Sent {} to {}", msg, host);
+                logger.debug("Sent Sub {} to {}", msg, host);
                 sendMessage(msg, host);
                 // this.stats.incrementSentFlood();
             }
@@ -298,7 +311,7 @@ public class VCube extends CommunicationCostCalculator {
         if (this.dimension == -1) {
 
             this.dimension = (int) (Math.log10(neighborSet.size()) / Math.log10(2)) + 1;
-            logger.info("  dimension has been set to {} since there are {} neighbors", dimension, neighborSet.size());
+            logger.debug("  dimension has been set to {} since there are {} neighbors", dimension, neighborSet.size());
 
         }
 
@@ -308,7 +321,7 @@ public class VCube extends CommunicationCostCalculator {
     public static int idFromHostAddress(Host host) {
         // offset ip by -10 since our ip range starts at 10 (from config file)
         int id = Integer.parseInt(host.getAddress().getHostAddress().split("\\.")[3]) - 10;
-        logger.info("Getting id from host {} got {}", host.getAddress().getHostAddress(), id);
+        // logger.debug("Getting id from host {} got {}", host.getAddress().getHostAddress(), id);
         return id;
     }
 
@@ -461,7 +474,7 @@ public class VCube extends CommunicationCostCalculator {
             }
             // First message from this source, e.g. there is no predecessor for this topic and source
             if (!hasRemoved && s.equals(originalSource) && c == 0) {
-                logger.info("removed since its first message {}", originalSource);
+                logger.debug("removed since its first message {}", originalSource);
                 iteratorCB.remove();
             }
 
@@ -471,7 +484,7 @@ public class VCube extends CommunicationCostCalculator {
     }
 
     private void checkReceptions(Integer t) {
-        logger.info("RECEPTION starting to validate reception for topic {}. deliveries is {}. ", t, deliveries.get(t));
+        logger.debug("RECEPTION starting to validate reception for topic {}. deliveries is {}. ", t, deliveries.get(t).size());
 
         Integer deliveredMessages;
         Integer causalChecks = 0;
@@ -520,8 +533,8 @@ public class VCube extends CommunicationCostCalculator {
                     deliveredMessages++;
 
                 } else {
-                    logger.info("REJECTED by causal barrier mid: {}, source: {}, topic {}, incoming CB {}, local delivery status for topic {}",
-                            treeMessage.getMid(), sourceId, t, treeMessage.getCausalBarrierList(), deliveries.get(t));
+                    // logger.debug("REJECTED by causal barrier mid: {}, source: {}, topic {}, incoming CB {}, local delivery status for topic {}",
+                    //       treeMessage.getMid(), sourceId, t, treeMessage.getCausalBarrierList(), deliveries.get(t));
                 }
             }
         } while (deliveredMessages != 0);
