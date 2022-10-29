@@ -30,6 +30,7 @@ public class MultiFileWorker {
         this.file = new File(fileName);
         if(!this.file.getParentFile().mkdirs())
             logger.warn("Directory for files already existed or was not created.");
+        logger.info("Path for file is {}", file);
         this.dos = new DataOutputStream(new FileOutputStream(this.file));
         this.index = new HashMap<>();
         this.indexSpacing = indexSpacing;

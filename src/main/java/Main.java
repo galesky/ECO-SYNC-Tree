@@ -8,6 +8,7 @@ import protocols.broadcast.flood.FloodBroadcast;
 import protocols.broadcast.periodicpull.PeriodicPullBroadcast;
 import protocols.broadcast.synctree.SyncTree;
 import protocols.broadcast.synctree.EcoSyncTree;
+import protocols.membership.full.SimpleFullMembership;
 import protocols.membership.hyparview.HyParView;
 import protocols.replication.ReplicationKernel;
 import pt.unl.fct.di.novasys.babel.core.Babel;
@@ -65,7 +66,7 @@ public class Main {
                 replicationKernel = new ReplicationKernel(myself, SyncTree.PROTOCOL_ID);
                 broadcast = new SyncTree(props, myself);
                 membership = new HyParView(props, myself_membership);
-                registerAndStartProtocols(babel, crdtApp, replicationKernel, broadcast, membership, props);
+                registerAndStartProtocols(  babel, crdtApp, replicationKernel, broadcast, membership, props);
                 break;
 
             case "plumtreegc":
@@ -81,6 +82,14 @@ public class Main {
                 replicationKernel = new ReplicationKernel(myself, FloodBroadcast.PROTOCOL_ID);
                 broadcast = new FloodBroadcast(props, myself);
                 membership = new HyParView(props, myself_membership);
+                registerAndStartProtocols(babel, crdtApp, replicationKernel, broadcast, membership, props);
+                break;
+
+            case "flood_and_full_membership":
+                crdtApp = new CRDTApp(props, myself, ReplicationKernel.PROTOCOL_ID, FloodBroadcast.PROTOCOL_ID);
+                replicationKernel = new ReplicationKernel(myself, FloodBroadcast.PROTOCOL_ID);
+                broadcast = new FloodBroadcast(props, myself);
+                membership = new SimpleFullMembership(props, myself_membership);
                 registerAndStartProtocols(babel, crdtApp, replicationKernel, broadcast, membership, props);
                 break;
 

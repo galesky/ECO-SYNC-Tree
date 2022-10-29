@@ -1,35 +1,23 @@
 package protocols.membership.full;
 
-import java.io.IOException;
-import java.net.InetAddress;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Properties;
-import java.util.Random;
-import java.util.Set;
-
+import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
+import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
+import pt.unl.fct.di.novasys.channel.tcp.events.*;
+import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import babel.core.GenericProtocol;
-import babel.exceptions.HandlerRegistrationException;
-import babel.generic.ProtoMessage;
-import channel.tcp.TCPChannel;
-import channel.tcp.events.ChannelMetrics;
-import channel.tcp.events.InConnectionDown;
-import channel.tcp.events.InConnectionUp;
-import channel.tcp.events.OutConnectionDown;
-import channel.tcp.events.OutConnectionFailed;
-import channel.tcp.events.OutConnectionUp;
-import network.data.Host;
 import protocols.membership.common.notifications.ChannelCreated;
 import protocols.membership.common.notifications.NeighbourDown;
 import protocols.membership.common.notifications.NeighbourUp;
 import protocols.membership.full.messages.SampleMessage;
 import protocols.membership.full.timers.InfoTimer;
 import protocols.membership.full.timers.SampleTimer;
+
+import java.io.IOException;
+import java.net.InetAddress;
+import java.util.*;
 
 public class SimpleFullMembership extends GenericProtocol {
 

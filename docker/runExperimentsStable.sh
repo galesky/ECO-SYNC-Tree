@@ -172,10 +172,10 @@ done
 sleep 15
 
 ### COMPRESSING LOGS ###
-sudo-g5k chown -R evieira:g5k-users /tmp/logs
+sudo-g5k chown -R lgalesky:g5k-users /tmp/logs
 nodes=$(uniq "$OAR_NODEFILE" | sed -n '1!p')
 for n in $nodes; do
-  oarsh -n $n "sudo-g5k chown -R evieira:g5k-users /tmp/logs"
+  oarsh -n $n "sudo-g5k chown -R lgalesky:g5k-users /tmp/logs"
   rsync -e 'oarsh' -arzP $n:/tmp/logs/* /tmp/logs &
 done
 wait
