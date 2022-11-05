@@ -117,7 +117,7 @@ public class SimpleFullMembership extends GenericProtocol {
     private void uponSample(SampleMessage msg, Host from, short sourceProto, int channelId) {
         //Received a sample from a peer. We add all the unknown peers to the "pending" map and attempt to establish
         //a connection. If the connection is successful, we add the peer to the membership (in the connectionUp callback)
-        logger.debug("Received {} from {}", msg, from);
+        logger.info("Received {} from {}", msg, from);
         for (Host h : msg.getSample()) {
             if (!h.equals(self) && !membership.contains(h) && !pending.contains(h)) {
                 pending.add(h);
@@ -136,13 +136,13 @@ public class SimpleFullMembership extends GenericProtocol {
     /*--------------------------------- Timers ---------------------------------------- */
     private void uponSampleTimer(SampleTimer timer, long timerId) {
         //When the SampleTimer is triggered, get a random peer in the membership and send a sample
-        logger.debug("Sample Time: membership{}", membership);
+        logger.info("Sample Time: membership{}", membership);
         if (membership.size() > 0) {
             Host target = getRandom(membership);
             Set<Host> subset = getRandomSubsetExcluding(membership, subsetSize, target);
             subset.add(self);
             sendMessage(new SampleMessage(subset), target);
-            logger.debug("Sent SampleMessage {}", target);
+            logger.info("Sent SampleMessage {}", target);
         }
     }
 
@@ -172,9 +172,13 @@ public class SimpleFullMembership extends GenericProtocol {
     //respective peer to the membership, and inform the Dissemination protocol via a notification.
     private void uponOutConnectionUp(OutConnectionUp event, int channelId) {
         Host peer = event.getNode();
-        logger.debug("Connection to {} is up", peer);
+        logger.info("Connection to {} is up", peer);
         pending.remove(peer);
         if (membership.add(peer)) {
+            StringBuilder sb = new StringBuilder(String.format("[PEER %s] VIS-TREEDUPE: ", self));
+            sb.append(String.format("Added %s to eager; ", peer));
+            sb.append(String.format("VIEWS:  %s", membership));
+            logger.info(sb);
             triggerNotification(new NeighbourUp(peer));
         }
     }
@@ -183,7 +187,7 @@ public class SimpleFullMembership extends GenericProtocol {
     //protocol. Alternatively, we could do smarter things like retrying the connection X times.
     private void uponOutConnectionDown(OutConnectionDown event, int channelId) {
         Host peer = event.getNode();
-        logger.debug("Connection to {} is down cause {}", peer, event.getCause());
+        logger.info("Connection to {} is down cause {}", peer, event.getCause());
         membership.remove(event.getNode());
         triggerNotification(new NeighbourDown(event.getNode()));
     }
@@ -192,7 +196,7 @@ public class SimpleFullMembership extends GenericProtocol {
     //pending set. Note that this event is only triggered while attempting a connection, not after connection.
     //Thus the peer will be in the pending set, and not in the membership (unless something is very wrong with our code)
     private void uponOutConnectionFailed(OutConnectionFailed<ProtoMessage> event, int channelId) {
-        logger.debug("Connection to {} failed cause: {}", event.getNode(), event.getCause());
+        logger.info("Connection to {} failed cause: {}", event.getNode(), event.getCause());
         pending.remove(event.getNode());
     }
 
