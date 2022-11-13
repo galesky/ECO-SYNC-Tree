@@ -8,6 +8,7 @@ import protocols.broadcast.flood.FloodBroadcast;
 import protocols.broadcast.periodicpull.PeriodicPullBroadcast;
 import protocols.broadcast.synctree.SyncTree;
 import protocols.broadcast.synctree.EcoSyncTree;
+import protocols.broadcast.vcube.VCube;
 import protocols.membership.full.SimpleFullMembership;
 import protocols.membership.hyparview.HyParView;
 import protocols.replication.ReplicationKernel;
@@ -89,6 +90,14 @@ public class Main {
                 crdtApp = new CRDTApp(props, myself, ReplicationKernel.PROTOCOL_ID, FloodBroadcast.PROTOCOL_ID);
                 replicationKernel = new ReplicationKernel(myself, FloodBroadcast.PROTOCOL_ID);
                 broadcast = new FloodBroadcast(props, myself);
+                membership = new SimpleFullMembership(props, myself_membership);
+                registerAndStartProtocols(babel, crdtApp, replicationKernel, broadcast, membership, props);
+                break;
+
+            case "vcube_and_full_membership":
+                crdtApp = new CRDTApp(props, myself, ReplicationKernel.PROTOCOL_ID, VCube.PROTOCOL_ID);
+                replicationKernel = new ReplicationKernel(myself, VCube.PROTOCOL_ID);
+                broadcast = new VCube(props, myself);
                 membership = new SimpleFullMembership(props, myself_membership);
                 registerAndStartProtocols(babel, crdtApp, replicationKernel, broadcast, membership, props);
                 break;
