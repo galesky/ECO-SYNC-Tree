@@ -3,30 +3,16 @@ package protocols.broadcast.vcube;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import protocols.broadcast.common.messages.GossipMessage;
-import protocols.broadcast.common.messages.SendVectorClockMessage;
-import protocols.broadcast.common.messages.SynchronizationMessage;
-import protocols.broadcast.common.messages.VectorClockMessage;
 import protocols.broadcast.common.notifications.DeliverNotification;
 import protocols.broadcast.common.requests.BroadcastRequest;
-import protocols.broadcast.common.timers.ReconnectTimeout;
 import protocols.broadcast.common.utils.CommunicationCostCalculator;
-import protocols.broadcast.common.utils.MultiFileManager;
-import protocols.broadcast.common.utils.VectorClock;
-import protocols.broadcast.flood.FloodBroadcast;
-import protocols.broadcast.flood.utils.FloodStats;
-import protocols.broadcast.periodicpull.PeriodicPullBroadcast;
-import protocols.broadcast.synctree.utils.IncomingSync;
-import protocols.broadcast.synctree.utils.OutgoingSync;
 import protocols.membership.common.notifications.NeighbourDown;
 import protocols.membership.common.notifications.NeighbourUp;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
-import pt.unl.fct.di.novasys.channel.tcp.events.*;
 import pt.unl.fct.di.novasys.network.data.Host;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.*;
 
@@ -42,7 +28,7 @@ public class VCube extends CommunicationCostCalculator {
     private final static int PORT_MAPPING = 1000;
 
     private final HashSet<Host> neighborSet;
-    private HashSet<UUID> received;
+    private final HashSet<UUID> receivedMsgIds;
 
     private final Host myself;
 
@@ -50,8 +36,8 @@ public class VCube extends CommunicationCostCalculator {
         super(PROTOCOL_NAME, PROTOCOL_ID);
         this.myself = myself;
 
-        // tracks all neighbors, maybe it is redundant with the membership ?
         this.neighborSet = new HashSet<>();
+        this.receivedMsgIds = new HashSet<>();
 
         String cMetricsInterval = properties.getProperty("bcast_channel_metrics_interval", "10000"); // 10 seconds
         Properties channelProps = new Properties();
@@ -124,7 +110,7 @@ public class VCube extends CommunicationCostCalculator {
     private void uponReceiveGossipMsg(GossipMessage msg, Host from, short sourceProto, int channelId) {
         UUID mid = msg.getMid();
         logger.debug("Received {} from {}. Is from sync {}", mid, from, false);
-        if (received.add(mid)) {
+        if (receivedMsgIds.add(mid)) {
             handleGossipMessage(msg, from, false);
         } else {
             logger.info("DUPLICATE from {}", from);
@@ -154,6 +140,4 @@ public class VCube extends CommunicationCostCalculator {
     private void onMessageFailed(ProtoMessage protoMessage, Host host, short destProto, Throwable reason, int channel) {
         logger.warn("Message failed to " + host + ", " + protoMessage + ": " + reason.getMessage());
     }
-
-
 }
