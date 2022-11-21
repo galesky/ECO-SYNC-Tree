@@ -22,7 +22,7 @@ public class TopicGossipMessage extends ProtoMessage {
 
     @Override
     public String toString() {
-        return "TopicGossipMessage{" +
+        return this.getClass().getSimpleName() + "{" +
                 "mid=" + mid +
                 ", sender=" + originalSender +
                 ", senderClock=" + senderClock +

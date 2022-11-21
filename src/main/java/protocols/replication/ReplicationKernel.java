@@ -149,7 +149,7 @@ public class ReplicationKernel extends GenericProtocol {
 
                 try {
                     UUID mid = UUID.randomUUID();
-                    logger.debug("Downstream {} {} op for {} - {}", opType, value, crdtId, mid);
+                    logger.info("Downstream {} {} op for {} - {}", opType, value, crdtId, mid);
                     sendRequest(new BroadcastRequest(mid, myself, serializeOperation(false, op)), broadcastId);
                 } catch (Exception e) {
                     logger.error("Error handling counter downstream request", e);
@@ -173,7 +173,7 @@ public class ReplicationKernel extends GenericProtocol {
 
                 try {
                     UUID mid = UUID.randomUUID();
-                    logger.debug("Downstream {} {} op for {} - {}", opType, value, crdtId, mid);
+                    logger.info("Downstream {} {} op for {} - {}", opType, value, crdtId, mid);
                     sendRequest(new BroadcastRequest(mid, myself, serializeOperation(false, op)), broadcastId);
                 } catch (Exception e) {
                     logger.error("Error handling register downstream request", e);
@@ -205,7 +205,7 @@ public class ReplicationKernel extends GenericProtocol {
 
                 try {
                     UUID mid = UUID.randomUUID();
-                    logger.debug("Downstream {} {} op for {} - {}", opType, value, crdtId, mid);
+                    logger.info("Downstream {} {} op for {} - {}", opType, value, crdtId, mid);
                     sendRequest(new BroadcastRequest(mid, myself, serializeOperation(false, op)), broadcastId);
                 } catch (Exception e) {
                     logger.error("Error handling set downstream request", e);
@@ -239,9 +239,9 @@ public class ReplicationKernel extends GenericProtocol {
                 try {
                     UUID mid = UUID.randomUUID();
                     if(opType == ORMapCRDT.MapOpType.PUT)
-                        logger.debug("Downstream {} {} op for {} {} - {}", opType, key, value, crdtId, mid);
+                        logger.info("Downstream {} {} op for {} {} - {}", opType, key, value, crdtId, mid);
                     else
-                        logger.debug("Downstream {} {} op for {} - {}", opType, key, crdtId, mid);
+                        logger.info("Downstream {} {} op for {} - {}", opType, key, crdtId, mid);
                     sendRequest(new BroadcastRequest(mid, myself, serializeOperation(false, op)), broadcastId);
                 } catch (Exception e) {
                     logger.error("Error handling map downstream request", e);
@@ -255,6 +255,7 @@ public class ReplicationKernel extends GenericProtocol {
     private void uponDeliverNotification(DeliverNotification notification, short sourceProto) {
         try {
             UUID mid = notification.getMsgId();
+            logger.info("We got a delivery! Id is {}", notification);
             Operation op = deserializeOperation(notification.getMsg());
             String crdtId = op.getCrdtId();
             String crdtType = op.getCrdtType();
@@ -320,6 +321,8 @@ public class ReplicationKernel extends GenericProtocol {
         if (opType.equals(CREATE_CRDT)) {
             op = CreateOperation.serializer.deserialize(null, buf);
         } else {
+            logger.info("Deserializing op with id {}, type {} and op_tpe {}", crdtId, crdtType, opType);
+            logger.info("dataSerializers.get(crdtId) is {}, and dataSerializers has size {} and keys {}", dataSerializers.get(crdtId), dataSerializers.size(), dataSerializers.keySet());
             MySerializer[] serializers = dataSerializers.get(crdtId).toArray(new MySerializer[2]);
             op = (Operation) opSerializers.get(crdtType).deserialize(serializers, buf);
         }

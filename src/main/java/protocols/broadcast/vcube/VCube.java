@@ -2,9 +2,12 @@ package protocols.broadcast.vcube;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import protocols.apps.timers.CreateCRDTsTimer;
 import protocols.broadcast.common.messages.TopicGossipMessage;
+import protocols.broadcast.common.messages.TopicSubMessage;
 import protocols.broadcast.common.notifications.DeliverNotification;
 import protocols.broadcast.common.requests.BroadcastRequest;
+import protocols.broadcast.common.timers.SetupOverlayTimer;
 import protocols.broadcast.common.utils.CommunicationCostCalculator;
 import protocols.membership.common.notifications.NeighbourDown;
 import protocols.membership.common.notifications.NeighbourUp;
@@ -23,7 +26,11 @@ public class VCube extends CommunicationCostCalculator {
     public static final short PROTOCOL_ID = 837;
     private final Integer DEFAULT_TOPIC = 782;
 
+    private final int createTime;
+    private static final int TO_MILLIS = 1000;
     private int seqNumber; // Counter of local operations
+
+    private Map<Integer, HashSet<Integer>> vcubeConfig = VCubeConfig.nodeIdsByTopic;
 
     protected int channelId;
     private final static int PORT_MAPPING = 1000;
@@ -33,6 +40,7 @@ public class VCube extends CommunicationCostCalculator {
 
     private final HashMap<Integer, Host> hostByNodeId;
     private final HashMap<Integer, HashSet<Integer>> nodeIdsByTopic;
+    private final HashSet<Integer> myTopics;
     private final Host myself;
     private final int myId;
     /**
@@ -45,11 +53,15 @@ public class VCube extends CommunicationCostCalculator {
         this.myself = myself;
         this.myId = idFromHostAddress(myself);
 
+        this.createTime = Integer.parseInt(properties.getProperty("create_time"));
+        logger.info("Setup create time as {}", createTime);
+
         this.neighborSet = new HashSet<>();
         this.receivedMsgIds = new HashSet<>();
         this.hostByNodeId = new HashMap<>();
         this.nodeIdsByTopic = new HashMap<>();
         this.nodeIdsByTopic.put(this.DEFAULT_TOPIC, new HashSet<>());
+        this.myTopics = new HashSet<>();
 
         String cMetricsInterval = properties.getProperty("bcast_channel_metrics_interval", "10000"); // 10 seconds
         Properties channelProps = new Properties();
@@ -74,16 +86,23 @@ public class VCube extends CommunicationCostCalculator {
         /*---------------------- Register Message Handlers -------------------------- */
         // Every gossip message is applied through this, this means both locally generated as received from other nodes
         registerMessageHandler(channelId, TopicGossipMessage.MSG_ID, this::uponReceiveGossipMsg, this::onMessageFailed);
+        registerMessageHandler(channelId, TopicSubMessage.MSG_ID, this::uponReceiveSubMsg, this::onMessageFailed);
+
 
         /*---------------------- Register Message Serializers ---------------------- */
         // Note: Not sure if this is really needed. It is not directly called by this class but we do receive/send
         // Gossip messages
         registerMessageSerializer(channelId, TopicGossipMessage.MSG_ID, TopicGossipMessage.serializer);
+        registerMessageSerializer(channelId, TopicSubMessage.MSG_ID, TopicSubMessage.serializer);
+        /*---------------------- Register Message Serializers ---------------------- */
+        registerTimerHandler(SetupOverlayTimer.TIMER_ID, this::uponSetupOverlayTimer);
+
     }
 
     @Override
     public void init(Properties props) {
-
+        setupTimer(new SetupOverlayTimer(), (long) Math.ceil(createTime * TO_MILLIS * 0.8));
+        setupMyTopics();
     }
 
     private void uponNeighbourUp(NeighbourUp notification, short sourceProto) {
@@ -95,7 +114,7 @@ public class VCube extends CommunicationCostCalculator {
             hostByNodeId.put(neighborId, neighbor);
             nodeIdsByTopic.get(this.DEFAULT_TOPIC).add(neighborId);
 
-            logger.info("Added {} to partial view due to up {}", neighbor, neighborSet);
+            logger.info("Added {} with id {} to partial view due to up. Set is {} and map is {}", neighbor, neighborId, neighborSet, hostByNodeId);
         } else {
             logger.error("Tried to add {} to partial view but is already there {}", neighbor, neighborSet);
         }
@@ -118,7 +137,8 @@ public class VCube extends CommunicationCostCalculator {
         UUID mid = request.getMsgId();
         byte[] content = request.getMsg();
         logger.info("Propagating my {} to {}", mid, neighborSet);
-        TopicGossipMessage msg = new TopicGossipMessage(mid, myself, ++seqNumber, content, DEFAULT_TOPIC);
+        // at this point we will likely decide to which topic to send the message to given a hot-topic distribution.
+        TopicGossipMessage msg = new TopicGossipMessage(mid, myself, ++seqNumber, content, getRandomTopic());
         logger.info("SENT {}", mid);
         uponReceiveGossipMsg(msg, myself, getProtoId(), -1);
     }
@@ -126,29 +146,33 @@ public class VCube extends CommunicationCostCalculator {
     private void uponReceiveGossipMsg(TopicGossipMessage msg, Host from, short sourceProto, int channelId) {
         UUID mid = msg.getMid();
         int topic = msg.getTopic();
-        logger.info("Received {} from {}. Is from sync {}. Topic is {}", mid, from, false, topic);
+        logger.info("Received {} from {}. Topic is {}", mid, from, topic);
         if (receivedMsgIds.add(mid)) {
-            handleTopicGossipMessage(msg, from, false);
+            logger.info("Total unique SUB messages so far {}", receivedMsgIds.size());
+            handleTopicGossipMessage(msg, from);
         } else {
             logger.info("DUPLICATE from {}", from);
             // track stats here
         }
     }
 
-    private void handleTopicGossipMessage(TopicGossipMessage msg, Host from, boolean fromSync) {
+    private void handleTopicGossipMessage(TopicGossipMessage msg, Host from) {
         Host sender = msg.getOriginalSender();
 
         UUID mid = msg.getMid();
-        logger.info("RECEIVED {}", mid);
+        logger.info("RECEIVED TopicGossip {}", mid);
         triggerNotification(new DeliverNotification(mid, msg.getContent()));
         forwardTopicGossipMessage(msg, from);
     }
 
     private void forwardTopicGossipMessage(TopicGossipMessage msg, Host from) {
         // dryrun hypercube
-        List<Integer> hypercubeNeighborhood = hypercubeNeighborhood(myId, getDimension(), this.DEFAULT_TOPIC);
+        List<Integer> hypercubeNeighborhood = hypercubeNeighborhood(myId, getDimension(), msg.getTopic());
         logger.info("Determined hypercubeNeighbors {}", hypercubeNeighborhood);
-        neighborSet.forEach(host -> {
+        hypercubeNeighborhood.forEach(hostId -> {
+            Host host = hostByNodeId.get(hostId);
+            logger.info("Select host {} with id {}", host, hostId);
+
             if (!host.equals(from)) {
                 logger.info("Sent {} to {}", msg, host);
                 sendMessage(msg, host);
@@ -157,8 +181,82 @@ public class VCube extends CommunicationCostCalculator {
         });
     }
 
+    // Get uniform random topic
+    private int getRandomTopic() {
+        int size = myTopics.size();
+        int item = new Random().nextInt(size); // In real life, the Random object should be rather more shared than this
+        int i = 0;
+        for(int topic : myTopics)
+        {
+            if (i == item)
+                return topic;
+            i++;
+        }
+        return 0;
+    }
+
     private void onMessageFailed(ProtoMessage protoMessage, Host host, short destProto, Throwable reason, int channel) {
         logger.warn("Message failed to " + host + ", " + protoMessage + ": " + reason.getMessage());
+    }
+
+    // --------- SUB/UNS message handling ------
+    private void uponSetupOverlayTimer(SetupOverlayTimer timer, long timerId) {
+        logger.info("Starting uponSetupOverlayTimer");
+        for (int topic: myTopics) {
+            UUID uuid = UUID.randomUUID();
+            TopicSubMessage msg = new TopicSubMessage(uuid, myself,topic);
+            forwardTopicSubMessage(msg, myself);
+        }
+    }
+
+    private void setupMyTopics() {
+        vcubeConfig.forEach((key, value) -> {
+            // only initialize myself
+            if (value.contains(myId)) {
+                nodeIdsByTopic.put(key, new HashSet<>(Arrays.asList(myId)));
+                myTopics.add(key);
+            }
+        });
+    }
+
+    private void uponReceiveSubMsg(TopicSubMessage msg, Host from, short sourceProto, int channelId) {
+        UUID mid = msg.getMid();
+        int targetTopic = msg.getTargetTopic();
+        logger.info("Received SUB message {} from {}. Target topic is {}", mid, from, targetTopic);
+        if (receivedMsgIds.add(mid)) {
+            logger.info("Total unique SUB messages so far {}", receivedMsgIds.size());
+            handleTopicSubMessage(msg, from);
+        } else {
+            logger.info("DUPLICATE SUB message from {}", from);
+            // track stats here
+        }
+    }
+
+    private void handleTopicSubMessage(TopicSubMessage msg, Host from) {
+        Host sender = msg.getOriginalSender();
+        UUID mid = msg.getMid();
+        int targetTopic = msg.getTargetTopic();
+        // This I'm not sure.
+        // Should we only keep track of subscribers from topics we are members or of all ?
+        if (myTopics.contains(targetTopic)) {
+            nodeIdsByTopic.get(targetTopic).add(idFromHostAddress(sender));
+        }
+        logger.info("RECEIVED {} from {} sender", mid, sender);
+        // add to topic sub list
+        forwardTopicSubMessage(msg, from);
+    }
+
+    private void forwardTopicSubMessage(TopicSubMessage msg, Host from) {
+        // dryrun hypercube
+        List<Integer> hypercubeNeighborhood = hypercubeNeighborhood(myId, getDimension(), null);
+        logger.info("Determined hypercubeNeighbors {}", hypercubeNeighborhood);
+        neighborSet.forEach(host -> {
+            if (!host.equals(from)) {
+                logger.info("Sent {} to {}", msg, host);
+                sendMessage(msg, host);
+                // this.stats.incrementSentFlood();
+            }
+        });
     }
 
     // --------- From VCube PS -----------------
