@@ -10,85 +10,60 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.util.UUID;
 
-public class TopicGossipMessage extends ProtoMessage {
-    public static final short MSG_ID = 926;
+public class TopicSubMessage extends ProtoMessage {
+    public static final short MSG_ID = 281;
 
     private final UUID mid;
     private final Host originalSender;
-    private final int senderClock;
-    private final byte[] content;
-
-    private final int topic;
+    private final int targetTopic;
 
     @Override
     public String toString() {
-        return "TopicGossipMessage{" +
+        return this.getClass().getSimpleName() + "{" +
                 "mid=" + mid +
                 ", sender=" + originalSender +
-                ", senderClock=" + senderClock +
-                ", topic=" + topic +
+                ", targetTopic=" + targetTopic +
                 '}';
     }
 
-    public TopicGossipMessage(UUID mid, Host originalSender, int senderClock, byte[] content, int topic) {
+    public TopicSubMessage(UUID mid, Host originalSender, int targetTopic) {
         super(MSG_ID);
         this.mid = mid;
         this.originalSender = originalSender;
-        this.senderClock = senderClock;
-        this.content = content;
-        this.topic = topic;
+        this.targetTopic = targetTopic;
     }
 
 	public Host getOriginalSender() {
         return originalSender;
     }
 
-    public int getSenderClock() {
-        return senderClock;
-    }
+    public int getTargetTopic() { return targetTopic; }
 
     public UUID getMid() {
         return mid;
     }
 
-    public byte[] getContent() {
-        return content;
-    }
-
-    public int getTopic() { return topic; }
-
-    public static ISerializer<TopicGossipMessage> serializer = new ISerializer<TopicGossipMessage>() {
+    public static ISerializer<TopicSubMessage> serializer = new ISerializer<TopicSubMessage>() {
         @Override
-        public void serialize(TopicGossipMessage topicGossipMessage, ByteBuf out) throws IOException {
+        public void serialize(TopicSubMessage topicGossipMessage, ByteBuf out) throws IOException {
             out.writeLong(topicGossipMessage.mid.getMostSignificantBits());
             out.writeLong(topicGossipMessage.mid.getLeastSignificantBits());
             Host.serializer.serialize(topicGossipMessage.originalSender, out);
-            out.writeInt(topicGossipMessage.senderClock);
-            out.writeInt(topicGossipMessage.content.length);
-            if (topicGossipMessage.content.length > 0) {
-                out.writeBytes(topicGossipMessage.content);
-            }
-            out.writeInt(topicGossipMessage.topic);
+            out.writeInt(topicGossipMessage.targetTopic);
         }
 
         @Override
-        public TopicGossipMessage deserialize(ByteBuf in) throws IOException {
+        public TopicSubMessage deserialize(ByteBuf in) throws IOException {
             long firstLong = in.readLong();
             long secondLong = in.readLong();
             UUID mid = new UUID(firstLong, secondLong);
             Host sender = Host.serializer.deserialize(in);
-            int senderClock = in.readInt();
-            int size = in.readInt();
-            byte[] content = new byte[size];
-            if (size > 0)
-                in.readBytes(content);
-            int topic = in.readInt();
-
-            return new TopicGossipMessage(mid, sender, senderClock, content, topic);
+            int targetTopic = in.readInt();
+            return new TopicSubMessage(mid, sender, targetTopic);
         }
     };
 
-    public static TopicGossipMessage deserialize(DataInputStream dis) throws IOException {
+    public static TopicSubMessage deserialize(DataInputStream dis) throws IOException {
         long firstLong = dis.readLong();
         long secondLong = dis.readLong();
         UUID mid = new UUID(firstLong, secondLong);
@@ -96,12 +71,7 @@ public class TopicGossipMessage extends ProtoMessage {
         dis.read(addrBytes);
         int port = dis.readShort() & '\uffff';
         Host sender = new Host(InetAddress.getByAddress(addrBytes), port);
-        int senderClock = dis.readInt();
-        int size = dis.readInt();
-        byte[] content = new byte[size];
-        if (size > 0)
-            dis.read(content);
-        int topic = dis.readInt();
-        return new TopicGossipMessage(mid, sender, senderClock, content, topic);
+        int targetTopic = dis.readInt();
+        return new TopicSubMessage(mid, sender, targetTopic);
     }
 }
