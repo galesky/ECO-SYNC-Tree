@@ -7,6 +7,7 @@ import protocols.broadcast.common.messages.TopicGossipMessage;
 import protocols.broadcast.common.messages.TopicSubMessage;
 import protocols.broadcast.common.notifications.DeliverNotification;
 import protocols.broadcast.common.requests.BroadcastRequest;
+import protocols.broadcast.common.requests.TopicBroadcastRequest;
 import protocols.broadcast.common.timers.SetupOverlayTimer;
 import protocols.broadcast.common.utils.CommunicationCostCalculator;
 import protocols.membership.common.notifications.NeighbourDown;
@@ -24,13 +25,12 @@ public class VCube extends CommunicationCostCalculator {
 
     public static final String PROTOCOL_NAME = "VCUBEPS";
     public static final short PROTOCOL_ID = 837;
-    private final Integer DEFAULT_TOPIC = 782;
 
     private final int createTime;
     private static final int TO_MILLIS = 1000;
     private int seqNumber; // Counter of local operations
 
-    private Map<Integer, HashSet<Integer>> vcubeConfig = VCubeConfig.nodeIdsByTopic;
+    private final Map<Integer, HashSet<Integer>> vcubeConfig = VCubeConfig.nodeIdsByTopic;
 
     protected int channelId;
     private final static int PORT_MAPPING = 1000;
@@ -60,7 +60,6 @@ public class VCube extends CommunicationCostCalculator {
         this.receivedMsgIds = new HashSet<>();
         this.hostByNodeId = new HashMap<>();
         this.nodeIdsByTopic = new HashMap<>();
-        this.nodeIdsByTopic.put(this.DEFAULT_TOPIC, new HashSet<>());
         this.myTopics = new HashSet<>();
 
         String cMetricsInterval = properties.getProperty("bcast_channel_metrics_interval", "10000"); // 10 seconds
@@ -77,7 +76,7 @@ public class VCube extends CommunicationCostCalculator {
         channelId = createChannel(TCPChannel.NAME, channelProps); // Create the channel with the given properties
         /*--------------------- Register Request Handlers ----------------------------- */
         // these are requests that come from the CRDT app Layer to send to other neighbors
-        registerRequestHandler(BroadcastRequest.REQUEST_ID, this::uponBroadcastRequest);
+        registerRequestHandler(TopicBroadcastRequest.REQUEST_ID, this::uponBroadcastRequest);
 
         /*--------------------- Register Notification Handlers ----------------------------- */
         subscribeNotification(NeighbourUp.NOTIFICATION_ID, this::uponNeighbourUp);
@@ -101,7 +100,7 @@ public class VCube extends CommunicationCostCalculator {
 
     @Override
     public void init(Properties props) {
-        setupTimer(new SetupOverlayTimer(), (long) Math.ceil(createTime * TO_MILLIS * 0.8));
+        setupTimer(new SetupOverlayTimer(), (long) Math.ceil(createTime * TO_MILLIS * 0.7                                         ));
         setupMyTopics();
     }
 
@@ -112,7 +111,6 @@ public class VCube extends CommunicationCostCalculator {
         if (neighborSet.add(neighbor)) {
             int neighborId = idFromHostAddress(neighbor);
             hostByNodeId.put(neighborId, neighbor);
-            nodeIdsByTopic.get(this.DEFAULT_TOPIC).add(neighborId);
 
             logger.info("Added {} with id {} to partial view due to up. Set is {} and map is {}", neighbor, neighborId, neighborSet, hostByNodeId);
         } else {
@@ -133,12 +131,12 @@ public class VCube extends CommunicationCostCalculator {
         closeConnection(neighbor);
     }
 
-    private void uponBroadcastRequest(BroadcastRequest request, short sourceProto) {
+    private void uponBroadcastRequest(TopicBroadcastRequest request, short sourceProto) {
         UUID mid = request.getMsgId();
         byte[] content = request.getMsg();
         logger.info("Propagating my {} to {}", mid, neighborSet);
         // at this point we will likely decide to which topic to send the message to given a hot-topic distribution.
-        TopicGossipMessage msg = new TopicGossipMessage(mid, myself, ++seqNumber, content, getRandomTopic());
+        TopicGossipMessage msg = new TopicGossipMessage(mid, myself, ++seqNumber, content, request.getTopic());
         logger.info("SENT {}", mid);
         uponReceiveGossipMsg(msg, myself, getProtoId(), -1);
     }
@@ -278,7 +276,7 @@ public class VCube extends CommunicationCostCalculator {
         return this.dimension;
     }
 
-    public int idFromHostAddress(Host host) {
+    public static int idFromHostAddress(Host host) {
         // offset ip by -10 since our ip range starts at 10 (from config file)
         int id = Integer.parseInt(host.getAddress().getHostAddress().split("\\.")[3]) - 10;
         logger.info("Getting id from host {} got {}", host.getAddress().getHostAddress(), id);

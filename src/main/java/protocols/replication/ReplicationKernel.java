@@ -1,5 +1,6 @@
 package protocols.replication;
 
+import protocols.broadcast.common.requests.TopicBroadcastRequest;
 import protocols.replication.crdts.operations.*;
 import protocols.replication.crdts.datatypes.*;
 import protocols.replication.exceptions.NoSuchCrdtType;
@@ -25,6 +26,8 @@ import protocols.replication.crdts.serializers.MySerializer;
 import java.io.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+
+import static protocols.apps.CRDTApp.getTopicFromCrdtName;
 
 public class ReplicationKernel extends GenericProtocol {
 
@@ -96,6 +99,11 @@ public class ReplicationKernel extends GenericProtocol {
 
     /* --------------------------------- Requests --------------------------------- */
 
+    /**
+     * Gets an existing CRDT or creates a new one
+     * @param request
+     * @param sourceProto
+     */
     private void uponGetCRDTRequest(GetCRDTRequest request, short sourceProto) {
         try {
             String crdtId = request.getCrdtId();
@@ -112,7 +120,7 @@ public class ReplicationKernel extends GenericProtocol {
                 }
             } else {
                 CreateOperation op = new CreateOperation(CREATE_CRDT, crdtId, crdtType, dataTypes);
-                sendRequest(new BroadcastRequest(msgId, myself, serializeOperation(true, op)), broadcastId);
+                sendRequest(new TopicBroadcastRequest(msgId, myself, getTopicFromCrdtName(crdtId), serializeOperation(true, op)), broadcastId);
             }
         } catch (IOException e) {
             logger.error("Error when creating CRDT", e);
@@ -161,7 +169,7 @@ public class ReplicationKernel extends GenericProtocol {
     private void uponRegisterOperationRequest(RegisterOperationRequest request, short sourceProto) {
         String crdtId = request.getCrdtId();
         KernelCRDT crdt = crdtsById.get(crdtId);
-
+        logger.info("Register Operation received for {}. Current know crdts are {} ", crdtId, crdtsById.keySet());
         if(crdt != null) {
             if(crdt instanceof LWWRegisterCRDT) {
                 SerializableType value = request.getValue();
@@ -173,8 +181,8 @@ public class ReplicationKernel extends GenericProtocol {
 
                 try {
                     UUID mid = UUID.randomUUID();
-                    logger.info("Downstream {} {} op for {} - {}", opType, value, crdtId, mid);
-                    sendRequest(new BroadcastRequest(mid, myself, serializeOperation(false, op)), broadcastId);
+                    logger.info("Downstream {} {} op for {} - {} and {}", opType, value, crdtId, mid, getTopicFromCrdtName(crdtId));
+                    sendRequest(new TopicBroadcastRequest(mid, myself, getTopicFromCrdtName(crdtId),serializeOperation(false, op)), broadcastId);
                 } catch (Exception e) {
                     logger.error("Error handling register downstream request", e);
                 }
@@ -260,14 +268,19 @@ public class ReplicationKernel extends GenericProtocol {
             String crdtId = op.getCrdtId();
             String crdtType = op.getCrdtType();
             if (op instanceof CreateOperation) {
+                logger.info("Create Operation received, CRDTs by Id is currently {}", crdtsById.entrySet());
                 KernelCRDT crdt = crdtsById.get(crdtId);
                 if (crdt == null) {
+                    logger.info("CRDT was null, creating new CRDT {}", crdtId);
                     crdt = createNewCrdt(crdtId,  crdtType, ((CreateOperation) op).getDataTypes());
                     triggerNotification(new ReturnCRDTNotification(mid, crdt));
                 } else {
                     if (validateCrdtType(crdt, crdtType)) {
+                        logger.info("ReturnCRDTNotification {}", crdtId);
                         triggerNotification(new ReturnCRDTNotification(mid, crdt));
                     } else {
+                        logger.info("CRDT already exists {}", crdtId);
+
                         triggerNotification(new CRDTAlreadyExistsNotification(mid, crdtId));
                     }
                 }
@@ -319,6 +332,7 @@ public class ReplicationKernel extends GenericProtocol {
         Operation op;
 
         if (opType.equals(CREATE_CRDT)) {
+            logger.info("Deserializing op with id {}, type {} and op_tpe {}. At this point dataSerializers.size() is {}", crdtId, crdtType, opType, dataSerializers.size());
             op = CreateOperation.serializer.deserialize(null, buf);
         } else {
             logger.info("Deserializing op with id {}, type {} and op_tpe {}", crdtId, crdtType, opType);

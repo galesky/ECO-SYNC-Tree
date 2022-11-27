@@ -3,7 +3,12 @@ package protocols.broadcast.vcube;
 
 import java.util.*;
 
+/**
+ * Simulation parameters
+ */
 public class VCubeConfig {
+
+    // Static config for simulation usage only
     static public Map<Integer, HashSet<Integer>> nodeIdsByTopic;
 
     static {

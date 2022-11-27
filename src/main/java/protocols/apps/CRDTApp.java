@@ -6,6 +6,7 @@ import protocols.broadcast.flood.FloodBroadcast;
 import protocols.broadcast.flood.utils.FloodStats;
 import protocols.broadcast.periodicpull.utils.PeriodicPullStats;
 import protocols.broadcast.synctree.EcoSyncTree;
+import protocols.broadcast.vcube.VCubeConfig;
 import protocols.replication.crdts.interfaces.*;
 import protocols.broadcast.periodicpull.PeriodicPullBroadcast;
 import protocols.broadcast.synctree.SyncTree;
@@ -25,14 +26,19 @@ import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.network.data.Host;
 
+import static protocols.broadcast.vcube.VCube.idFromHostAddress;
+
 public class CRDTApp extends GenericProtocol {
 
     private static final Logger logger = LogManager.getLogger(CRDTApp.class);
+
+    private final Map<Integer, HashSet<Integer>> nodeIdsByTopicConfig = VCubeConfig.nodeIdsByTopic;
 
     //Protocol information, to register in babel
     public static final String PROTO_NAME = "CRDTApp";
     public static final short PROTO_ID = 300;
 
+    private final HashSet<Integer> myTopics;
     private static final int TO_MILLIS = 1000;
     //RUN = 0 --> counter; 1 --> register; 2 --> set; 3 --> map; 4 --> 8 registers;
     //5 --> 8 sets; 6 --> 8 maps; 7 --> 1 of each CRDT; 8 --> counter + register + set + map
@@ -45,6 +51,8 @@ public class CRDTApp extends GenericProtocol {
     private static final String OR_MAP = "or_map";
 
     private static final String CRDT0 = "CRDT0";
+
+    private static final String crdtPrefix = "CRDT";
     private static final String CRDT1 = "CRDT1";
     private static final String CRDT2 = "CRDT2";
     private static final String CRDT3 = "CRDT3";
@@ -78,6 +86,7 @@ public class CRDTApp extends GenericProtocol {
 
     private final Map<String, GenericCRDT> myCRDTs;
 
+    private final int myId;
 
     public CRDTApp(Properties properties, Host self, short replicationKernelId, short broadcastId) throws HandlerRegistrationException {
         super(PROTO_NAME, PROTO_ID);
@@ -85,6 +94,8 @@ public class CRDTApp extends GenericProtocol {
         this.broadcastId = broadcastId;
         this.self = self;
         this.myCRDTs = new HashMap<>();
+        this.myId = idFromHostAddress(self);
+        this.myTopics = new HashSet<>();
 
         //Read configurations
         this.createTime = Integer.parseInt(properties.getProperty("create_time"));
@@ -113,6 +124,9 @@ public class CRDTApp extends GenericProtocol {
     @Override
     public void init(Properties props) {
         //Wait before creating CRDTs
+        logger.info("Setting up topics");
+        setupMyTopics();
+
         logger.info("Waiting...");
         setupTimer(new CreateCRDTsTimer(), (long) createTime * TO_MILLIS);
     }
@@ -246,13 +260,18 @@ public class CRDTApp extends GenericProtocol {
                 getCRDT(OR_MAP, new String[]{"int", "int"}, CRDT3);
                 break;
             case  9:
-                getCRDT(LWW_REGISTER, new String[]{"string"}, CRDT0);
+                for (Integer topic: myTopics) {
+                    String topicCrdt = getCrdtNameFromTopic(topic);
+                    logger.info("Calling getCRDT for {}", topicCrdt);
+                    getCRDT(LWW_REGISTER, new String[]{"string"}, crdtPrefix + topic);
+                }
                 break;
         }
     }
 
     private void executeWithProbability(double prob) {
         if(Math.random() <= prob) {
+            String crdtId = getCrdtNameFromTopic(getRandomTopic());
             switch (CRDTApp.RUN) {
                 case 8:
                     executeCounterOperation(CRDT0, CounterOpType.INCREMENT, 1);
@@ -261,7 +280,7 @@ public class CRDTApp extends GenericProtocol {
                     executeMapOperation(CRDT3, MapOpType.PUT, new IntegerType(rand.nextInt(10)), new IntegerType(rand.nextInt(1000)));
                     break;
                 case 9:
-                    executeRegisterOperation(CRDT0, RegisterOpType.ASSIGN, new StringType(generateRandomString(payloadSize)));
+                    executeRegisterOperation(crdtId, RegisterOpType.ASSIGN, new StringType(generateRandomString(payloadSize)));
                     break;
             }
         }
@@ -437,7 +456,9 @@ public class CRDTApp extends GenericProtocol {
                     logger.info("[CRDT-VAL] {}:{} {}", CRDT3, key, getMapping(CRDT3, key));
                 break;
             case 9:
-                logger.info("[CRDT-VAL] {} {}", CRDT0, getRegisterValue(CRDT0));
+                for (Integer topic: myTopics) {
+                    logger.info("[CRDT-VAL] {} {}", getCrdtNameFromTopic(topic), getRegisterValue(getCrdtNameFromTopic(topic)));
+                }
                 break;
         }
     }
@@ -486,5 +507,40 @@ public class CRDTApp extends GenericProtocol {
         }
         return randomString.toString();
     }
+    // ------- Topics and partial replication
 
+
+    // Simulation only - in a real world scenario a public API would be able to setup to which topic the node belongs to
+    private void setupMyTopics() {
+        logger.info("Started setting up topics");
+        nodeIdsByTopicConfig.forEach((key, value) -> {
+            // only initialize myself
+            if (value.contains(myId)) {
+                myTopics.add(key);
+            }
+        });
+        logger.info("Topics are set, my topics are {}", myTopics);
+    }
+
+    private int getRandomTopic() {
+        int size = myTopics.size();
+        int item = new Random().nextInt(size); // In real life, the Random object should be rather more shared than this
+        int i = 0;
+        for(int topic : myTopics)
+        {
+            if (i == item)
+                return topic;
+            i++;
+        }
+        return 0;
+    }
+
+    private String getCrdtNameFromTopic (Integer topic) {
+        return crdtPrefix + topic;
+    }
+
+    static public Integer getTopicFromCrdtName (String name) {
+        String topicString = name.replace(crdtPrefix,"");
+        return Integer.valueOf(topicString);
+    }
 }
