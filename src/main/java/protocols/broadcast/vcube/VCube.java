@@ -15,6 +15,7 @@ import protocols.membership.common.notifications.NeighbourUp;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
+import pt.unl.fct.di.novasys.channel.tcp.events.ChannelMetrics;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.io.IOException;
@@ -93,9 +94,11 @@ public class VCube extends CommunicationCostCalculator {
         // Gossip messages
         registerMessageSerializer(channelId, TopicGossipMessage.MSG_ID, TopicGossipMessage.serializer);
         registerMessageSerializer(channelId, TopicSubMessage.MSG_ID, TopicSubMessage.serializer);
-        /*---------------------- Register Message Serializers ---------------------- */
+        /*---------------------- Register Timers ---------------------- */
         registerTimerHandler(SetupOverlayTimer.TIMER_ID, this::uponSetupOverlayTimer);
 
+        /*---------------------- Register Channel events ---------------------- */
+        registerChannelEventHandler(channelId, ChannelMetrics.EVENT_ID, this::uponChannelMetrics);
     }
 
     @Override
@@ -164,10 +167,11 @@ public class VCube extends CommunicationCostCalculator {
     }
 
     private void forwardTopicGossipMessage(TopicGossipMessage msg, Host from) {
-        // dryrun hypercube
-        List<Integer> hypercubeNeighborhood = hypercubeNeighborhood(myId, getDimension(), msg.getTopic());
-        logger.info("Determined hypercubeNeighbors {}", hypercubeNeighborhood);
-        hypercubeNeighborhood.forEach(hostId -> {
+        int cluster = myself.equals(from) ? getDimension() : (cluster(myId, idFromHostAddress(from)) - 1);
+        List<Integer> neighbors = hypercubeNeighborhood(myId, cluster, msg.getTopic());
+
+        logger.info("Determined HypercubeNeighbors {}", neighbors);
+        neighbors.forEach(hostId -> {
             Host host = hostByNodeId.get(hostId);
             logger.info("Select host {} with id {}", host, hostId);
 
@@ -177,20 +181,6 @@ public class VCube extends CommunicationCostCalculator {
                 // this.stats.incrementSentFlood();
             }
         });
-    }
-
-    // Get uniform random topic
-    private int getRandomTopic() {
-        int size = myTopics.size();
-        int item = new Random().nextInt(size); // In real life, the Random object should be rather more shared than this
-        int i = 0;
-        for(int topic : myTopics)
-        {
-            if (i == item)
-                return topic;
-            i++;
-        }
-        return 0;
     }
 
     private void onMessageFailed(ProtoMessage protoMessage, Host host, short destProto, Throwable reason, int channel) {
@@ -380,6 +370,24 @@ public class VCube extends CommunicationCostCalculator {
             return null;
         }
         return neighborId; // If got here, then it contains this node
+    }
+
+    /*
+     * Returns the index s of the cluster of
+     * process i that contains process j.
+     *
+     * cluster_i(j) = s (msb(i xor j) + 1)
+     */
+    public int cluster(int node_i, int node_j) {
+
+        int s = 0;
+
+        for (int k = node_i ^ node_j; k > 0; k = k >> 1) {
+            s++;
+        }
+
+        return s;
+
     }
 
 }
