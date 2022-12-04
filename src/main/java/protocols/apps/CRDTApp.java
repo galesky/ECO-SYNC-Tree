@@ -175,7 +175,7 @@ public class CRDTApp extends GenericProtocol {
         logger.warn("Creating CRDTs...");
         getCRDTs();
         logger.warn("Starting operations...");
-        sendOpsTimer = setupPeriodicTimer(new SendOpsTimer(), 0, sendOpsTimeout);
+        sendOpsTimer = setupPeriodicTimer(new SendOpsTimer(), 0, sendOpsTimeout * 25);
         setupTimer(new StopTimer(), (long) runTime * TO_MILLIS);
     }
 

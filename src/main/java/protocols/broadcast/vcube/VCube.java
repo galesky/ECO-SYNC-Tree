@@ -2,11 +2,9 @@ package protocols.broadcast.vcube;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import protocols.apps.timers.CreateCRDTsTimer;
 import protocols.broadcast.common.messages.TopicGossipMessage;
 import protocols.broadcast.common.messages.TopicSubMessage;
 import protocols.broadcast.common.notifications.DeliverNotification;
-import protocols.broadcast.common.requests.BroadcastRequest;
 import protocols.broadcast.common.requests.TopicBroadcastRequest;
 import protocols.broadcast.common.timers.SetupOverlayTimer;
 import protocols.broadcast.common.utils.CommunicationCostCalculator;
@@ -44,6 +42,11 @@ public class VCube extends CommunicationCostCalculator {
     private final HashSet<Integer> myTopics;
     private final Host myself;
     private final int myId;
+
+    protected Map<Integer, List<TopicGossipMessage>> receptions = new HashMap<>();
+    protected Map<Integer, List<CausalBarrierItem>> causalBarrierByTopic = new HashMap<>();
+    protected Map<Integer, List<CausalBarrierItem>> deliveries = new HashMap<>();
+
     /**
      * The height of the tree. Also matches the max number of clusters that a tree will broadcast to.
      */
@@ -62,6 +65,7 @@ public class VCube extends CommunicationCostCalculator {
         this.hostByNodeId = new HashMap<>();
         this.nodeIdsByTopic = new HashMap<>();
         this.myTopics = new HashSet<>();
+        this.seqNumber = 0;
 
         String cMetricsInterval = properties.getProperty("bcast_channel_metrics_interval", "10000"); // 10 seconds
         Properties channelProps = new Properties();
@@ -87,7 +91,6 @@ public class VCube extends CommunicationCostCalculator {
         // Every gossip message is applied through this, this means both locally generated as received from other nodes
         registerMessageHandler(channelId, TopicGossipMessage.MSG_ID, this::uponReceiveGossipMsg, this::onMessageFailed);
         registerMessageHandler(channelId, TopicSubMessage.MSG_ID, this::uponReceiveSubMsg, this::onMessageFailed);
-
 
         /*---------------------- Register Message Serializers ---------------------- */
         // Note: Not sure if this is really needed. It is not directly called by this class but we do receive/send
@@ -137,19 +140,35 @@ public class VCube extends CommunicationCostCalculator {
     private void uponBroadcastRequest(TopicBroadcastRequest request, short sourceProto) {
         UUID mid = request.getMsgId();
         byte[] content = request.getMsg();
+        Integer t = request.getTopic();
+
+        if (! this.causalBarrierByTopic.containsKey(t)) {
+            this.causalBarrierByTopic.put(t, new ArrayList<>());
+        }
+
+        List<CausalBarrierItem> oldCausalBarrierList = this.causalBarrierByTopic.get(t);
+        CausalBarrierItem causalBarrierItem = new CausalBarrierItem(myId, seqNumber);
+
+        List<CausalBarrierItem> newCausalBarrierList = new ArrayList<>();
+        // probably removable ? This will be added when the message is delivered
+        newCausalBarrierList.add(causalBarrierItem);
+
+        this.causalBarrierByTopic.put(t, newCausalBarrierList);
+        ++seqNumber;
+
         logger.info("Propagating my {} to {}", mid, neighborSet);
         // at this point we will likely decide to which topic to send the message to given a hot-topic distribution.
-        TopicGossipMessage msg = new TopicGossipMessage(mid, myself, ++seqNumber, content, request.getTopic());
-        logger.info("SENT {}", mid);
+        TopicGossipMessage msg = new TopicGossipMessage(mid, myself, seqNumber, content, request.getTopic(), oldCausalBarrierList);
+        logger.info("BROADCAST_REQUEST {} with barrier {}", mid, oldCausalBarrierList);
         uponReceiveGossipMsg(msg, myself, getProtoId(), -1);
     }
 
     private void uponReceiveGossipMsg(TopicGossipMessage msg, Host from, short sourceProto, int channelId) {
         UUID mid = msg.getMid();
         int topic = msg.getTopic();
-        logger.info("Received {} from {}. Topic is {}", mid, from, topic);
+        logger.info("Received {} from {}. Topic is {}", msg, from, topic);
         if (receivedMsgIds.add(mid)) {
-            logger.info("Total unique SUB messages so far {}", receivedMsgIds.size());
+            logger.info("Total unique PUB messages so far {}", receivedMsgIds.size());
             handleTopicGossipMessage(msg, from);
         } else {
             logger.info("DUPLICATE from {}", from);
@@ -158,12 +177,32 @@ public class VCube extends CommunicationCostCalculator {
     }
 
     private void handleTopicGossipMessage(TopicGossipMessage msg, Host from) {
-        Host sender = msg.getOriginalSender();
+        int t = msg.getTopic();
+
+        logger.info("PRE-RECEIVED TopicGossip {}", msg);
+
+        if (! this.receptions.containsKey(t)) {
+            this.receptions.put(t, new ArrayList<>());
+        }
+
+        if (! this.deliveries.containsKey(t)) {
+            this.deliveries.put(t, new ArrayList<>());
+        }
+
+        this.receptions.get(t).add(msg);
 
         UUID mid = msg.getMid();
-        logger.info("RECEIVED TopicGossip {}", mid);
-        triggerNotification(new DeliverNotification(mid, msg.getContent()));
-        forwardTopicGossipMessage(msg, from);
+        logger.info("RECEIVED TopicGossip {}", msg);
+        // Forward first
+        // the transmission process is async, use a copy
+        TopicGossipMessage payload = TopicGossipMessage.from(msg);
+        forwardTopicGossipMessage(payload, from);
+        // Apply later
+        // otherwise the barrier on the message will already have been compressed by the time it is transmitted
+        // dependencies may be lost
+        // the important part here is to not mutate the message while other threads are manipulating it
+        // also we do not want this to be synchronized, so we use a copy
+        this.checkReceptions(t);
     }
 
     private void forwardTopicGossipMessage(TopicGossipMessage msg, Host from) {
@@ -390,4 +429,98 @@ public class VCube extends CommunicationCostCalculator {
 
     }
 
+    private boolean checkCausalBarrier(Integer originalSource, Integer t, List<CausalBarrierItem> incomingCbList) {
+        // logger.info("CAUSAL_BARRIER validating for topic {}. source is {}. barrier is {}", t, originalSource, incomingCbList );
+
+        if (incomingCbList == null) {
+            return true;
+        }
+
+        Iterator<CausalBarrierItem> iteratorCB = incomingCbList.iterator();
+
+        while (iteratorCB.hasNext()) {
+
+            CausalBarrierItem cbItem = iteratorCB.next();
+
+            Integer s = cbItem.getSource();
+            int c = cbItem.getCounter();
+            int deliveredSource;
+            int deliveredCounter;
+            boolean hasRemoved = false;
+
+            for (CausalBarrierItem deliveryItem : this.deliveries.get(t)) {
+
+                deliveredSource = deliveryItem.getSource();
+                deliveredCounter = deliveryItem.getCounter();
+
+                if (s.equals(deliveredSource) && deliveredCounter >= c) {
+                    iteratorCB.remove();
+                    hasRemoved = true;
+                    break;
+                }
+            }
+            // First message from this source, e.g. there is no predecessor for this topic and source
+            if (!hasRemoved && s.equals(originalSource) && c == 0) {
+                logger.info("removed since its first message {}", originalSource);
+                iteratorCB.remove();
+            }
+
+        }
+        // logger.info("CAUSAL_BARRIER POST validating for topic {}. source is {}. barrier is {}. deliveries is {}", t, originalSource, incomingCbList, deliveries.get(t));
+        return (incomingCbList.size() == 0);
+    }
+
+    private void checkReceptions(Integer t) {
+        logger.info("RECEPTION starting to validate reception for topic {}. deliveries is {}. ", t, deliveries.get(t));
+
+        Integer deliveredMessages;
+
+        do {
+
+            deliveredMessages = 0;
+
+            List<CausalBarrierItem> cbList;
+
+            Iterator<TopicGossipMessage> iteratorRec = this.receptions.get(t).iterator();
+
+            while (iteratorRec.hasNext()) {
+
+                TopicGossipMessage treeMessage = iteratorRec.next();
+
+                Host sourceHost = treeMessage.getOriginalSender();
+                int sourceId = idFromHostAddress(sourceHost);
+                int c = treeMessage.getSenderClock();
+                cbList = treeMessage.getCausalBarrierList();
+
+                boolean checkCB = this.checkCausalBarrier(sourceId, t, cbList);
+
+                if (checkCB) {
+
+                    if (! this.causalBarrierByTopic.containsKey(t)) {
+                        this.causalBarrierByTopic.put(t, new ArrayList<>());
+                    }
+
+                    iteratorRec.remove();
+
+                    this.deliveries.get(t).add(new CausalBarrierItem(sourceId, c));
+                    this.deliveries.get(t).remove(new CausalBarrierItem(sourceId, c - 1)); // New: GC
+
+                    if (cbList != null) {
+                        this.causalBarrierByTopic.get(t).removeAll(cbList);
+                    }
+
+                    this.causalBarrierByTopic.get(t).add(new CausalBarrierItem(sourceId, c));
+                    logger.info("DELIVERED TopicGossip {} from source {}", treeMessage.getMid(), sourceId);
+                    triggerNotification(new DeliverNotification(treeMessage.getMid(), treeMessage.getContent()));
+
+                    deliveredMessages++;
+
+                } else {
+                    logger.info("REJECTED by causal barrier mid: {}, source: {}, topic {}, incoming CB {}, local delivery status for topic {}",
+                            treeMessage.getMid(), sourceId, t, treeMessage.getCausalBarrierList(), deliveries.get(t));
+                }
+            }
+        } while (deliveredMessages != 0);
+
+    }
 }

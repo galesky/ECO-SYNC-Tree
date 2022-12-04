@@ -1,8 +1,10 @@
 package protocols.broadcast.common.requests;
 
+import protocols.broadcast.vcube.CausalBarrierItem;
 import pt.unl.fct.di.novasys.babel.generic.ProtoRequest;
 import pt.unl.fct.di.novasys.network.data.Host;
 
+import java.util.List;
 import java.util.UUID;
 
 public class TopicBroadcastRequest extends ProtoRequest {
