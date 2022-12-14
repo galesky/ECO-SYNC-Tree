@@ -209,13 +209,13 @@ public class VCube extends CommunicationCostCalculator {
         int cluster = myself.equals(from) ? getDimension() : (cluster(myId, idFromHostAddress(from)) - 1);
         List<Integer> neighbors = hypercubeNeighborhood(myId, cluster, msg.getTopic());
 
-        logger.info("Determined HypercubeNeighbors {}", neighbors);
+        logger.info("Determined HypercubeNeighbors {} for cluster {}", neighbors, cluster);
         neighbors.forEach(hostId -> {
             Host host = hostByNodeId.get(hostId);
             logger.info("Select host {} with id {}", host, hostId);
 
             if (!host.equals(from)) {
-                logger.info("Sent {} to {}", msg, host);
+                logger.info("SENT {} to {}", msg, host);
                 sendMessage(msg, host);
                 // this.stats.incrementSentFlood();
             }
@@ -268,7 +268,7 @@ public class VCube extends CommunicationCostCalculator {
         if (myTopics.contains(targetTopic)) {
             nodeIdsByTopic.get(targetTopic).add(idFromHostAddress(sender));
         }
-        logger.info("RECEIVED {} from {} sender", mid, sender);
+        logger.info("SUBRECEIVED {} from {} sender", mid, sender);
         // add to topic sub list
         forwardTopicSubMessage(msg, from);
     }
@@ -430,7 +430,7 @@ public class VCube extends CommunicationCostCalculator {
     }
 
     private boolean checkCausalBarrier(Integer originalSource, Integer t, List<CausalBarrierItem> incomingCbList) {
-        // logger.info("CAUSAL_BARRIER validating for topic {}. source is {}. barrier is {}", t, originalSource, incomingCbList );
+        // logger.info("CAUSAL_BARRIER validating for topic {}. source is {}.", t, originalSource );
 
         if (incomingCbList == null) {
             return true;
@@ -474,6 +474,8 @@ public class VCube extends CommunicationCostCalculator {
         logger.info("RECEPTION starting to validate reception for topic {}. deliveries is {}. ", t, deliveries.get(t));
 
         Integer deliveredMessages;
+        Integer causalChecks = 0;
+        Integer positiveCausalChecks = 0;
 
         do {
 
@@ -493,8 +495,10 @@ public class VCube extends CommunicationCostCalculator {
                 cbList = treeMessage.getCausalBarrierList();
 
                 boolean checkCB = this.checkCausalBarrier(sourceId, t, cbList);
+                causalChecks++;
 
                 if (checkCB) {
+                    positiveCausalChecks++;
 
                     if (! this.causalBarrierByTopic.containsKey(t)) {
                         this.causalBarrierByTopic.put(t, new ArrayList<>());
@@ -521,6 +525,6 @@ public class VCube extends CommunicationCostCalculator {
                 }
             }
         } while (deliveredMessages != 0);
-
+        logger.info("Causal validations {} of which {} were valid", causalChecks, positiveCausalChecks);
     }
 }

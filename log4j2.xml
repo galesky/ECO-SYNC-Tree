@@ -19,15 +19,15 @@
         <Logger level="debug" name="protocols.membership"/>
 
 
-        <Logger level="info" name="io.netty"/>
-        <Logger level="info" name="pt.unl.fct.di.novasys.network"/>
-        <Logger level="info" name="pt.unl.fct.di.novasys.channel"/>
-        <Logger level="info" name="pt.unl.fct.di.novasys.babel"/>
+        <Logger level="debug" name="io.netty"/>
+        <Logger level="debug" name="pt.unl.fct.di.novasys.network"/>
+        <Logger level="debug" name="pt.unl.fct.di.novasys.channel"/>
+        <Logger level="debug" name="pt.unl.fct.di.novasys.babel"/>
 
 
         <Root level="debug">
-            <AppenderRef ref="Console" level="warn"/>
-           <AppenderRef ref="MyFile" level="info"/>
+            <AppenderRef ref="Console" level="debug"/>
+           <AppenderRef ref="MyFile" level="debug"/>
        </Root>
    </Loggers>
 

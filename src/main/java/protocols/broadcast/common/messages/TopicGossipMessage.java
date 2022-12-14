@@ -38,18 +38,18 @@ public class TopicGossipMessage extends ProtoMessage {
                 ", sender=" + originalSender +
                 ", senderClock=" + senderClock +
                 ", topic=" + topic +
-                ", causalBarrierItemList" + cbList +
                 '}';
     }
 
     public static TopicGossipMessage from (TopicGossipMessage msg) {
+        List<CausalBarrierItem> clonedList = new ArrayList<>(msg.cbList);
         return new TopicGossipMessage(
                 msg.mid,
                 msg.originalSender,
                 msg.senderClock,
                 msg.content,
                 msg.topic,
-                msg.cbList);
+                clonedList);
     }
 
     public TopicGossipMessage(UUID mid, Host originalSender, int senderClock, byte[] content, int topic, List<CausalBarrierItem> cbList) {
@@ -97,7 +97,7 @@ public class TopicGossipMessage extends ProtoMessage {
             }
             out.writeInt(topicGossipMessage.topic);
             out.writeInt(topicGossipMessage.cbList.size());
-            logger.info("about to serialize CB List {}, size {}, from mid {}", topicGossipMessage.cbList, topicGossipMessage.cbList.size(), topicGossipMessage.getMid());
+            // logger.info("about to serialize CB List {}, size {}, from mid {}", topicGossipMessage.cbList, topicGossipMessage.cbList.size(), topicGossipMessage.getMid());
             for (CausalBarrierItem cb : topicGossipMessage.cbList) {
                 out.writeInt(cb.getSource()); // source
                 out.writeInt(cb.getCounter()); // counter
@@ -118,14 +118,14 @@ public class TopicGossipMessage extends ProtoMessage {
             int topic = in.readInt();
             int listSize = in.readInt();
             List<CausalBarrierItem> newCbList = new ArrayList<>();
-            logger.info("about to de-serialize CB List {} from mid {}", listSize, mid);
+            // logger.info("about to de-serialize CB List {} from mid {}", listSize, mid);
             for (int i = 0; i < listSize; i++) {
                 int source = in.readInt();
                 int counter = in.readInt();
-                logger.info("de-serialize mid {} it {}", mid, i);
+                // logger.info("de-serialize mid {} it {}", mid, i);
                 newCbList.add(new CausalBarrierItem(source,counter));
             }
-            logger.info("de-serialize mid {} post cb is {}", mid, newCbList);
+            // logger.info("de-serialize mid {} post cb is {}", mid, newCbList);
 
             return new TopicGossipMessage(mid, sender, senderClock, content, topic, newCbList);
         }
@@ -146,15 +146,15 @@ public class TopicGossipMessage extends ProtoMessage {
             dis.read(content);
         int topic = dis.readInt();
         int listSize = dis.readInt();
-        logger.info("about to de-serialize CB List {} from mid {}", listSize, mid);
+        // logger.info("about to de-serialize CB List {} from mid {}", listSize, mid);
         List<CausalBarrierItem> newCbList = new ArrayList<>();
         for (int i = 0; i < listSize; i++) {
             int source = dis.readInt();
             int counter = dis.readInt();
-            logger.info("de-serialize mid {} it {}", mid, i);
+            // logger.info("de-serialize mid {} it {}", mid, i);
             newCbList.add(new CausalBarrierItem(source,counter));
         }
-        logger.info("de-serialize mid {} post cb is {}", mid, newCbList);
+        // logger.info("de-serialize mid {} post cb is {}", mid, newCbList);
         return new TopicGossipMessage(mid, sender, senderClock, content, topic, newCbList);
     }
 }

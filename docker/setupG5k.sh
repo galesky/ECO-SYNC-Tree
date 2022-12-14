@@ -20,7 +20,7 @@ wait
 docker swarm init
 JOIN_TOKEN=$(docker swarm join-token manager -q)
 
-host=$(hostname)
+host=$(hostname) # 172.18.20.25
 for node in $(oarprint host); do
   if [ $node != $host ]; then
     oarsh $node "docker swarm join --token $JOIN_TOKEN $host:2377"

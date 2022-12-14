@@ -127,7 +127,7 @@ public class CRDTApp extends GenericProtocol {
         logger.info("Setting up topics");
         setupMyTopics();
 
-        logger.info("Waiting...");
+        logger.info("Waiting... {}", createTime * TO_MILLIS);
         setupTimer(new CreateCRDTsTimer(), (long) createTime * TO_MILLIS);
     }
 
@@ -175,7 +175,7 @@ public class CRDTApp extends GenericProtocol {
         logger.warn("Creating CRDTs...");
         getCRDTs();
         logger.warn("Starting operations...");
-        sendOpsTimer = setupPeriodicTimer(new SendOpsTimer(), 0, sendOpsTimeout * 25);
+        sendOpsTimer = setupPeriodicTimer(new SendOpsTimer(), 0, sendOpsTimeout);
         setupTimer(new StopTimer(), (long) runTime * TO_MILLIS);
     }
 
