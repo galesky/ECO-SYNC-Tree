@@ -179,7 +179,7 @@ public class VCube extends CommunicationCostCalculator {
     private void handleTopicGossipMessage(TopicGossipMessage msg, Host from) {
         int t = msg.getTopic();
 
-        logger.debug("PRE-RECEIVED TopicGossip {}", msg);
+        logger.debug("PRE-RECEIVED TopicGossip {} from topic {}", msg, msg.getTopic());
 
         if (! this.receptions.containsKey(t)) {
             this.receptions.put(t, new ArrayList<>());
@@ -192,7 +192,7 @@ public class VCube extends CommunicationCostCalculator {
         this.receptions.get(t).add(msg);
 
         UUID mid = msg.getMid();
-        logger.info("RECEIVED {}", msg.getMid());
+        logger.info("RECEIVED {} from topic {} ", msg.getMid(), msg.getTopic());
         // Forward first
         // the transmission process is async, use a copy
         TopicGossipMessage payload = TopicGossipMessage.from(msg);
@@ -287,12 +287,15 @@ public class VCube extends CommunicationCostCalculator {
     }
 
     private void forwardTopicSubMessage(TopicSubMessage msg, Host from) {
-        // dryrun hypercube
-        List<Integer> hypercubeNeighborhood = hypercubeNeighborhood(myId, getDimension(), null);
-        logger.debug("Determined hypercubeNeighbors {}", hypercubeNeighborhood);
-        neighborSet.forEach(host -> {
+        int cluster = myself.equals(from) ? getDimension() : (cluster(myId, idFromHostAddress(from)) - 1);
+        List<Integer> hypercubeNeighborhood = hypercubeNeighborhood(myId, cluster, null);
+        logger.debug("Determined SUB hypercubeNeighbors {}", hypercubeNeighborhood);
+        hypercubeNeighborhood.forEach(hostId -> {
+            Host host = hostByNodeId.get(hostId);
+            logger.debug("Select SUB host {} with id {}", host, hostId);
+
             if (!host.equals(from)) {
-                logger.debug("Sent Sub {} to {}", msg, host);
+                logger.info("SUB-SENT {} to {}", msg.getMid(), host);
                 sendMessage(msg, host);
                 // this.stats.incrementSentFlood();
             }
@@ -367,6 +370,11 @@ public class VCube extends CommunicationCostCalculator {
         do {
 
             int k = cluster.remove(0);
+
+            if (k > neighborSet.size()) {
+                // These are equivalent to dead nodes
+                continue;
+            }
 
             if (topic == null) {
                 return k; // for SUB messages there is no topic metadata so we want to send to the first node
@@ -473,6 +481,7 @@ public class VCube extends CommunicationCostCalculator {
                 }
             }
             // First message from this source, e.g. there is no predecessor for this topic and source
+            // maybe this should be removed
             if (!hasRemoved && s.equals(originalSource) && c == 0) {
                 logger.debug("removed since its first message {}", originalSource);
                 iteratorCB.remove();
@@ -506,6 +515,9 @@ public class VCube extends CommunicationCostCalculator {
                 int sourceId = idFromHostAddress(sourceHost);
                 int c = treeMessage.getSenderClock();
                 cbList = treeMessage.getCausalBarrierList();
+                // the iterator will remove already delivered items from the list
+                // we need to make sure that every item is removed once the message is delivered
+                ArrayList<CausalBarrierItem> originalCbList = new ArrayList<>(cbList);
 
                 boolean checkCB = this.checkCausalBarrier(sourceId, t, cbList);
                 causalChecks++;
@@ -523,11 +535,11 @@ public class VCube extends CommunicationCostCalculator {
                     this.deliveries.get(t).remove(new CausalBarrierItem(sourceId, c - 1)); // New: GC
 
                     if (cbList != null) {
-                        this.causalBarrierByTopic.get(t).removeAll(cbList);
+                        this.causalBarrierByTopic.get(t).removeAll(originalCbList);
                     }
 
                     this.causalBarrierByTopic.get(t).add(new CausalBarrierItem(sourceId, c));
-                    logger.info("DELIVERED TopicGossip {} from source {}", treeMessage.getMid(), sourceId);
+                    logger.info("DELIVERED TopicGossip {} from source {} to topic {}", treeMessage.getMid(), sourceId, treeMessage.getTopic());
                     triggerNotification(new DeliverNotification(treeMessage.getMid(), treeMessage.getContent()));
 
                     deliveredMessages++;
