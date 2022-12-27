@@ -2,6 +2,7 @@ package protocols.apps;
 
 import java.util.*;
 
+import protocols.broadcast.common.utils.FastZipfGenerator;
 import protocols.broadcast.flood.FloodBroadcast;
 import protocols.broadcast.flood.utils.FloodStats;
 import protocols.broadcast.periodicpull.utils.PeriodicPullStats;
@@ -32,13 +33,13 @@ public class CRDTApp extends GenericProtocol {
 
     private static final Logger logger = LogManager.getLogger(CRDTApp.class);
 
-    private final Map<Integer, HashSet<Integer>> nodeIdsByTopicConfig = VCubeConfig.nodeIdsByTopic;
+    private final Map<Integer, HashSet<Integer>> nodeIdsByTopicConfig = VCubeConfig.getInstance().getNodeIdsByTopic();
 
     //Protocol information, to register in babel
     public static final String PROTO_NAME = "CRDTApp";
     public static final short PROTO_ID = 300;
 
-    private final HashSet<Integer> myTopics;
+    private final ArrayList<Integer> myTopics;
     private static final int TO_MILLIS = 1000;
     //RUN = 0 --> counter; 1 --> register; 2 --> set; 3 --> map; 4 --> 8 registers;
     //5 --> 8 sets; 6 --> 8 maps; 7 --> 1 of each CRDT; 8 --> counter + register + set + map
@@ -76,8 +77,10 @@ public class CRDTApp extends GenericProtocol {
     private final int exitTime;
 
     private final int payloadSize;
+    private final int run;
 
     private final float prob;
+    private final List<String> sendersPerRun;
 
     private final int sendOpsTimeout;
     private long sendOpsTimer;
@@ -88,6 +91,9 @@ public class CRDTApp extends GenericProtocol {
 
     private final int myId;
 
+    private FastZipfGenerator fastZipfGenerator;
+    private final double ZIP_F_SKEW = 0.825;
+
     public CRDTApp(Properties properties, Host self, short replicationKernelId, short broadcastId) throws HandlerRegistrationException {
         super(PROTO_NAME, PROTO_ID);
         this.replicationKernelId = replicationKernelId;
@@ -95,7 +101,7 @@ public class CRDTApp extends GenericProtocol {
         this.self = self;
         this.myCRDTs = new HashMap<>();
         this.myId = idFromHostAddress(self);
-        this.myTopics = new HashSet<>();
+        this.myTopics = new ArrayList<>();
 
         //Read configurations
         this.createTime = Integer.parseInt(properties.getProperty("create_time"));
@@ -105,6 +111,8 @@ public class CRDTApp extends GenericProtocol {
         this.payloadSize = Integer.parseInt(properties.getProperty("payload_size"));
         this.sendOpsTimeout = Integer.parseInt(properties.getProperty("send_ops_timeout"));
         this.prob = Float.parseFloat(properties.getProperty("op_probability", "1"));
+        this.sendersPerRun = Arrays.asList(properties.getProperty("senders", "1").split(";"));
+        this.run = Integer.parseInt(properties.getProperty("send_ops_timeout", "1"));
 
         this.rand = new Random();
 
@@ -172,10 +180,14 @@ public class CRDTApp extends GenericProtocol {
     /* --------------------------------- Timers --------------------------------- */
 
     private void uponCreateCRDTsTimer(CreateCRDTsTimer timer, long timerId) {
-        logger.warn("Creating CRDTs...");
-        getCRDTs();
-        logger.warn("Starting operations...");
-        sendOpsTimer = setupPeriodicTimer(new SendOpsTimer(), 0, sendOpsTimeout);
+        if (sendersPerRun.contains(Integer.toString(myId))) {
+            logger.warn("Creating CRDTs...");
+            getCRDTs();
+            logger.warn("Starting operations...");
+            sendOpsTimer = setupPeriodicTimer(new SendOpsTimer(), 0, sendOpsTimeout);
+        } else {
+            logger.warn("Subscriber only, waiting for messages");
+        }
         setupTimer(new StopTimer(), (long) runTime * TO_MILLIS);
     }
 
@@ -513,26 +525,27 @@ public class CRDTApp extends GenericProtocol {
     // Simulation only - in a real world scenario a public API would be able to setup to which topic the node belongs to
     private void setupMyTopics() {
         logger.info("Started setting up topics");
+        ArrayList<Integer> myTopicsLocal = new ArrayList<>();
         nodeIdsByTopicConfig.forEach((key, value) -> {
             // only initialize myself
             if (value.contains(myId)) {
-                myTopics.add(key);
+                myTopicsLocal.add(key);
             }
         });
+        Collections.sort(myTopicsLocal);
+
+        myTopics.addAll(myTopicsLocal);
+        this.fastZipfGenerator = new FastZipfGenerator(rand, myTopics.size(), ZIP_F_SKEW);
         logger.info("Topics are set, my topics are {}", myTopics);
     }
 
     private int getRandomTopic() {
-        int size = myTopics.size();
-        int item = new Random().nextInt(size); // In real life, the Random object should be rather more shared than this
-        int i = 0;
-        for(int topic : myTopics)
-        {
-            if (i == item)
-                return topic;
-            i++;
-        }
-        return 0;
+        int item = fastZipfGenerator.nextZipf();
+        int topic = myTopics.get(item - 1);
+        logger.info("Selected random topic {} at index {}", topic, item);
+
+        return topic;
+
     }
 
     private String getCrdtNameFromTopic (Integer topic) {

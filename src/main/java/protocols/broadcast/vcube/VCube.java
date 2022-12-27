@@ -29,7 +29,7 @@ public class VCube extends CommunicationCostCalculator {
     private static final int TO_MILLIS = 1000;
     private int seqNumber; // Counter of local operations
 
-    private final Map<Integer, HashSet<Integer>> vcubeConfig = VCubeConfig.nodeIdsByTopic;
+    private final Map<Integer, HashSet<Integer>> vcubeConfig = VCubeConfig.getInstance().getNodeIdsByTopic();
 
     protected int channelId;
     private final static int PORT_MAPPING = 1000;
@@ -419,7 +419,7 @@ public class VCube extends CommunicationCostCalculator {
      * not consider:
      *  - Joining and leaving dynamics
      *  - Presence of explicit FORWARDER nodes
-     * I think it is trying to decide it a node from the cluster (list of nodes) is a subscriber to the topic.
+     * Decides if a node from the cluster (list of nodes) is a valid subscriber to the topic.
      * @param topicNeighbors
      * @param neighborId
      * @return
@@ -481,7 +481,7 @@ public class VCube extends CommunicationCostCalculator {
                 }
             }
             // First message from this source, e.g. there is no predecessor for this topic and source
-            // maybe this should be removed
+            // This was replaced by a null barrier for the first message. It can be removed.
             if (!hasRemoved && s.equals(originalSource) && c == 0) {
                 logger.debug("removed since its first message {}", originalSource);
                 iteratorCB.remove();
