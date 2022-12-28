@@ -80,7 +80,9 @@ public class CRDTApp extends GenericProtocol {
     private final int run;
 
     private final float prob;
+
     private final List<String> sendersPerRun;
+    private final List<List<String>> sendersPerRunList;
 
     private final int sendOpsTimeout;
     private long sendOpsTimer;
@@ -111,8 +113,18 @@ public class CRDTApp extends GenericProtocol {
         this.payloadSize = Integer.parseInt(properties.getProperty("payload_size"));
         this.sendOpsTimeout = Integer.parseInt(properties.getProperty("send_ops_timeout"));
         this.prob = Float.parseFloat(properties.getProperty("op_probability", "1"));
+
+        // controls senders based on config file input
         this.sendersPerRun = Arrays.asList(properties.getProperty("senders", "1").split(";"));
-        this.run = Integer.parseInt(properties.getProperty("send_ops_timeout", "1"));
+        sendersPerRunList = new ArrayList<>();
+        for (int i = 0; i < sendersPerRun.size(); i++) {
+            sendersPerRunList.add(Arrays.asList(sendersPerRun.get(i).split(",")));
+        }
+        logger.info("sendersPerRunList... {}", sendersPerRunList);
+
+        this.run = Integer.parseInt(properties.getProperty("run", "999"));
+        logger.info("run... {}", run);
+
 
         this.rand = new Random();
 
@@ -180,7 +192,7 @@ public class CRDTApp extends GenericProtocol {
     /* --------------------------------- Timers --------------------------------- */
 
     private void uponCreateCRDTsTimer(CreateCRDTsTimer timer, long timerId) {
-        if (sendersPerRun.contains(Integer.toString(myId))) {
+        if (sendersPerRunList.get(run - 1).contains(Integer.toString(myId))) {
             logger.warn("Creating CRDTs...");
             getCRDTs();
             logger.warn("Starting operations...");
