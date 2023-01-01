@@ -47,6 +47,10 @@ public class VCube extends CommunicationCostCalculator {
     protected Map<Integer, List<CausalBarrierItem>> causalBarrierByTopic = new HashMap<>();
     protected Map<Integer, List<CausalBarrierItem>> deliveries = new HashMap<>();
 
+    private final List<String> subsPerRun;
+    private final List<List<String>> subsPerRunList;
+    private final int run;
+
     /**
      * The height of the tree. Also matches the max number of clusters that a tree will broadcast to.
      */
@@ -102,12 +106,31 @@ public class VCube extends CommunicationCostCalculator {
 
         /*---------------------- Register Channel events ---------------------- */
         registerChannelEventHandler(channelId, ChannelMetrics.EVENT_ID, this::uponChannelMetrics);
+
+
+        // controls subs based on config file input
+        this.subsPerRun = Arrays.asList(properties.getProperty("subs", "1").split(";"));
+        subsPerRunList = new ArrayList<>();
+        for (int i = 0; i < subsPerRun.size(); i++) {
+            subsPerRunList.add(Arrays.asList(subsPerRun.get(i).split(",")));
+        }
+        logger.info("subsPerRun... {}", subsPerRun);
+
+        this.run = Integer.parseInt(properties.getProperty("run", "999"));
+        logger.info("run... {}", run);
+
+        if (subsPerRunList.get(run - 1).contains(Integer.toString(myId))) {
+            myTopics.add(1);
+            nodeIdsByTopic.put(1, new HashSet<>(Arrays.asList(myId)));
+        }
+
+        logger.info("myTopics are... {}", myTopics);
     }
 
     @Override
     public void init(Properties props) {
         setupTimer(new SetupOverlayTimer(), (long) Math.ceil(createTime * TO_MILLIS * 0.7));
-        setupMyTopics();
+        // setupMyTopics();
     }
 
     private void uponNeighbourUp(NeighbourUp notification, short sourceProto) {

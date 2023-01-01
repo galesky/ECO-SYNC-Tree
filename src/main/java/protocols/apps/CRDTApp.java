@@ -82,7 +82,11 @@ public class CRDTApp extends GenericProtocol {
     private final float prob;
 
     private final List<String> sendersPerRun;
+    private final List<String> subsPerRun;
+
     private final List<List<String>> sendersPerRunList;
+    private final List<List<String>> subsPerRunList;
+
 
     private final int sendOpsTimeout;
     private long sendOpsTimer;
@@ -122,11 +126,25 @@ public class CRDTApp extends GenericProtocol {
         }
         logger.info("sendersPerRunList... {}", sendersPerRunList);
 
+
+        // controls subs based on config file input
+        this.subsPerRun = Arrays.asList(properties.getProperty("subs", "1").split(";"));
+        subsPerRunList = new ArrayList<>();
+        for (int i = 0; i < subsPerRun.size(); i++) {
+            subsPerRunList.add(Arrays.asList(subsPerRun.get(i).split(",")));
+        }
+        logger.info("subsPerRun... {}", subsPerRun);
+
         this.run = Integer.parseInt(properties.getProperty("run", "999"));
         logger.info("run... {}", run);
 
+        if (subsPerRunList.get(run - 1).contains(Integer.toString(myId))) {
+            myTopics.add(1);
+        }
+        logger.info("Topics are set, my topics are {}", myTopics);
 
         this.rand = new Random();
+        this.fastZipfGenerator = new FastZipfGenerator(rand, myTopics.size(), ZIP_F_SKEW);
 
         /*--------------------- Register Timer Handlers ----------------------------- */
         registerTimerHandler(SendOpsTimer.TIMER_ID, this::uponSendOpsTimer);
@@ -145,7 +163,7 @@ public class CRDTApp extends GenericProtocol {
     public void init(Properties props) {
         //Wait before creating CRDTs
         logger.info("Setting up topics");
-        setupMyTopics();
+        // setupMyTopics();
 
         logger.info("Waiting... {}", createTime * TO_MILLIS);
         setupTimer(new CreateCRDTsTimer(), (long) createTime * TO_MILLIS);
@@ -551,13 +569,26 @@ public class CRDTApp extends GenericProtocol {
         logger.info("Topics are set, my topics are {}", myTopics);
     }
 
-    private int getRandomTopic() {
+ /*    private int getRandomTopic() {
         int item = fastZipfGenerator.nextZipf();
         int topic = myTopics.get(item - 1);
         logger.info("Selected random topic {} at index {}", topic, item);
 
         return topic;
 
+    } */
+
+    private int getRandomTopic() {
+        int size = myTopics.size();
+        int item = this.rand.nextInt(size); // In real life, the Random object should be rather more shared than this
+        int i = 0;
+        for(int topic : myTopics)
+        {
+            if (i == item)
+                return topic;
+            i++;
+        }
+        return 0;
     }
 
     private String getCrdtNameFromTopic (Integer topic) {
